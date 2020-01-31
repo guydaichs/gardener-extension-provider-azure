@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
 
 	apisazure "github.com/gardener/gardener-extension-provider-azure/pkg/apis/azure"
 	azureapi "github.com/gardener/gardener-extension-provider-azure/pkg/apis/azure"
@@ -147,6 +148,37 @@ func (w *workerDelegate) generateMachineConfig(ctx context.Context) error {
 		if pool.Volume.Type != nil {
 			if *pool.Volume.Type == "Standard_LRS" || *pool.Volume.Type == "StandardSSD_LRS" || *pool.Volume.Type == "Premium_LRS" {
 				osDisk["type"] = *pool.Volume.Type
+			}
+		}
+
+		osDisk["encrypted"] = pool.Volume.Encrypted
+
+		var dataDisks []map[string]interface{}
+
+		dataVolumes := pool.DataVolumes
+		if dataVolumes != nil {
+			// sort volumes for consistent lun numbering
+			sort.Slice(dataVolumes, func(i, j int) bool {
+				return *dataVolumes[i].Name < *dataVolumes[j].Name
+			})
+
+			for i, vol := range dataVolumes {
+				volumeSize, err := worker.DiskSize(vol.Size)
+				if err != nil {
+					return err
+				}
+				disk := map[string]interface{}{
+					"diskSizeGB": volumeSize,
+				}
+				if vol.Type != nil {
+					disk["type"] = vol.Type
+				}
+				disk["name"] = vol.Name
+				disk["lun"] = int32(i)
+				disk["encrypted"] = vol.Encrypted
+				disk["caching"] = "None"
+				disk["createOption"] = "Empty"
+				dataDisks = append(dataDisks, disk)
 			}
 		}
 
